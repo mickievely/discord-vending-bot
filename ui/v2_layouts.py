@@ -4,38 +4,6 @@ from typing import Optional
 import discord
 
 
-class RootPanelLayout(discord.ui.LayoutView):
-    message: Optional[discord.Message] = None
-
-    def __init__(self, user: discord.abc.User, *, timeout: float = 300.0):
-        super().__init__(timeout=timeout)
-        self.user = user
-
-        opts = [
-            discord.SelectOption(label="서버 데이터 삭제", value="srv_del", description="선택한 서버의 자판기 데이터를 삭제"),
-        ]
-
-        row = discord.ui.ActionRow()
-        row.add_item(
-            discord.ui.Select(
-                custom_id="r:menu",
-                placeholder="작업 선택",
-                min_values=1,
-                max_values=1,
-                options=opts,
-            )
-        )
-
-        container = discord.ui.Container(
-            discord.ui.TextDisplay("## 개인용 자판기 관리자 패널"),
-            discord.ui.TextDisplay(f"{user.mention} 관리 작업을 선택해주세요."),
-            discord.ui.Separator(),
-            row,
-            accent_color=discord.Color.blurple(),
-        )
-        self.add_item(container)
-
-
 class VendingPanelLayout(discord.ui.LayoutView):
     message: Optional[discord.Message] = None
 

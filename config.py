@@ -27,16 +27,14 @@ def _get_bool(key: str, *, default: bool) -> bool:
     return raw not in {"0", "false", "no", "off"}
 
 
-def _snowflake_set(raw: str) -> set[int]:
-    return {int(x) for x in raw.split(",") if x.strip().isdigit()}
-
-
 DISCORD_TOKEN = _get("DISCORD_TOKEN")
+
+_guild_raw = _get("DISCORD_GUILD_ID")
+DISCORD_GUILD_ID = int(_guild_raw) if _guild_raw.isdigit() else 0
 
 DATA_DIR = _get("DATA_DIR", "./data") or "./data"
 
 EMBED_COLOR_DEFAULT = 0x6C63FF
-ROOT_USER_IDS = _snowflake_set(_get("ROOT_USER_IDS"))
 
 WEB_ADMIN_ID = _get("WEB_ADMIN_ID", "admin") or "admin"
 WEB_ADMIN_PASSWORD = _get("WEB_ADMIN_PASSWORD", "admin1234") or "admin1234"

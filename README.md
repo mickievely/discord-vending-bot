@@ -14,7 +14,7 @@ MIT · 자유롭게 사용·수정·배포 가능
 | 구매 · 충전 · 내 정보 | 주문 · 유저 · 충전 승인 | iOS 단축어 / 웹훅 |
 | VIP 할인 · 관리자 UI | VIP · 로그 · 공지 DM | [`자충.txt`](./자충.txt) 참고 |
 
-데이터는 서버(guild)마다 `data/servers/<guild_id>/server.db` (SQLite)에 저장됩니다.
+데이터는 `data/servers/<guild_id>/server.db` (SQLite)에 저장됩니다. **서버는 `.env`의 `DISCORD_GUILD_ID` 하나만** 사용합니다.
 
 ---
 
@@ -40,9 +40,9 @@ python bot.py
 
 ```env
 DISCORD_TOKEN=봇_토큰
-DATA_DIR=./data
+DISCORD_GUILD_ID=서버_ID
 
-ROOT_USER_IDS=디스코드_유저_ID
+DATA_DIR=./data
 
 WEB_ADMIN_ID=admin
 WEB_ADMIN_PASSWORD=강한_비밀번호
@@ -64,11 +64,6 @@ WEB_PANEL_AUTO_START=1
 | `/정보` | 유저 정보 조회 (관리자) |
 | `/수동충전` | 잔액 추가·차감 |
 | `/vip부여` | VIP 티어 부여 |
-| `/관리자패널` | ROOT 전용 (서버 DB 삭제 등) |
-
-### 유저
-
-**충전** → 계좌 입금 · 자동충전 연동 → **구매** → 재고 지급 → **정보**에서 내역 확인
 
 ---
 
@@ -78,8 +73,6 @@ WEB_PANEL_AUTO_START=1
 2. **충전 관리** — 승인/거절, AOS·iOS 계좌  
 3. **자판기 패널 설정** — 제목, 색, 이미지  
 4. **VIP · 로그 · 공지**  
-
-여러 서버 운영 시 상단에서 **서버 선택**으로 DB 전환.
 
 ---
 

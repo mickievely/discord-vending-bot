@@ -88,7 +88,7 @@ async function enterApp(opts = {}) {
   el('login-screen').classList.add('hidden');
   el('app').classList.remove('hidden');
   try {
-    await populateServers();
+    await initGuild();
     await showView(opts.view || viewFromPath() || 'dashboard', { replace: true });
   } catch (err) {
     console.error(err);

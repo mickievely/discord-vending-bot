@@ -12,7 +12,7 @@ import discord
 from aiohttp import web as aiohttp_web
 from discord.ext import commands
 
-from config import DISCORD_TOKEN, WEB_PANEL_AUTO_START
+from config import DISCORD_GUILD_ID, DISCORD_TOKEN, WEB_PANEL_AUTO_START
 from db import server_repo
 from services import notify, vending_service
 from ui.admin_modals import (
@@ -25,7 +25,6 @@ from ui.admin_modals import (
 from ui.admin_views import select_view
 from ui.embeds import error_embed, ok_embed, product_embed, purchase_embed
 from ui.modals import QtyModal
-from ui.root_modals import RootServerIdModal
 from ui.v2_layouts import VendingPanelLayout, vending_machine_message
 from ui.views import buy_view, product_view, purchase_dual_select_view
 
@@ -792,7 +791,8 @@ async def _refresh_posted_panels():
     shop_ids = {"k:buy", "k:products", "k:charge", "k:info"}
     shop_labels = {"구매", "제품", "충전", "정보"}
     updated = 0
-    for guild in list(bot.guilds):
+    guild = bot.get_guild(int(DISCORD_GUILD_ID)) if DISCORD_GUILD_ID else None
+    for guild in ([guild] if guild else []):
         try:
             panel = dict(await vending_service.panel(guild.id) or {})
         except Exception:
@@ -834,9 +834,34 @@ async def _refresh_posted_panels():
     print(f"posted panels refreshed: {updated}")
 
 
+async def _leave_foreign_guilds():
+    if not DISCORD_GUILD_ID:
+        return
+    want = int(DISCORD_GUILD_ID)
+    for guild in list(bot.guilds):
+        if int(guild.id) == want:
+            continue
+        try:
+            await guild.leave()
+            print(f"left guild (not configured): {guild.id} {guild.name}")
+        except Exception as e:
+            print(f"leave guild failed {guild.id}: {type(e).__name__}: {e}")
+
+
+@bot.event
+async def on_guild_join(guild: discord.Guild):
+    if DISCORD_GUILD_ID and int(guild.id) != int(DISCORD_GUILD_ID):
+        try:
+            await guild.leave()
+            print(f"left guild on join: {guild.id} {guild.name}")
+        except Exception as e:
+            print(f"leave guild on join failed: {type(e).__name__}: {e}")
+
+
 @bot.event
 async def on_ready():
     print(f"ready: {bot.user}")
+    await _leave_foreign_guilds()
     if not getattr(bot, "_panel_refresh_started", False):
         bot._panel_refresh_started = True
         asyncio.create_task(_refresh_posted_panels())
@@ -856,7 +881,7 @@ def _fast_component(cid: str) -> bool:
 def _needs_modal_response(cid: str) -> bool:
     if cid in {
         "k:buy_prod", "k:charge", "k:charge_pick", "a:charge_platform",
-        "a:prod_add_cat", "a:vm_add_cat", "r:menu", "v:admin",
+        "a:prod_add_cat", "a:vm_add_cat", "v:admin",
     }:
         return True
     return cid.startswith(("v:buy:", "rv:write:", "a:stock_method:", "a:log_pick:"))
@@ -943,6 +968,16 @@ async def interaction_router(interaction: discord.Interaction):
 
 async def _route_interaction(interaction: discord.Interaction):
     if interaction.type not in (discord.InteractionType.component, discord.InteractionType.modal_submit):
+        return
+    if interaction.guild and DISCORD_GUILD_ID and int(interaction.guild.id) != int(DISCORD_GUILD_ID):
+        if not interaction.response.is_done():
+            try:
+                await interaction.response.send_message(
+                    embed=error_embed("이 봇은 설정된 서버에서만 사용할 수 있어"),
+                    ephemeral=True,
+                )
+            except Exception:
+                pass
         return
 
     cid = (interaction.data or {}).get("custom_id")
@@ -1038,8 +1073,6 @@ async def _route_interaction(interaction: discord.Interaction):
             return await _handle_admin_charge_role(interaction)
         if cid == "a:charge_role_clear":
             return await _handle_admin_charge_role_clear(interaction)
-        if cid == "r:menu":
-            return await _handle_root_menu(interaction)
 
 
     if interaction.type == discord.InteractionType.modal_submit:
@@ -1057,8 +1090,6 @@ async def _route_interaction(interaction: discord.Interaction):
             return await _handle_admin_stock_edit_legacy(interaction, str(cid).split(":")[-1])
         if str(cid).startswith("a:stock_edit:"):
             return await _handle_admin_stock_edit(interaction, str(cid))
-        if str(cid).startswith("r:srv_del:"):
-            return await _handle_root_srv_del_modal(interaction, str(cid))
 
 
 async def _handle_vending_machine(interaction: discord.Interaction):
@@ -1722,6 +1753,8 @@ async def _refresh_panel_message(interaction: discord.Interaction, message_id: i
 async def on_message(message: discord.Message):
     if not message.guild:
         return await bot.process_commands(message)
+    if DISCORD_GUILD_ID and int(message.guild.id) != int(DISCORD_GUILD_ID):
+        return await bot.process_commands(message)
     try:
         cfg = await vending_service.get_charge_settings(message.guild.id)
         cfg = dict(cfg) if cfg else {}
@@ -1820,43 +1853,10 @@ def _acquire_single_instance():
 
 
 def main():
+    if not DISCORD_GUILD_ID:
+        raise SystemExit("DISCORD_GUILD_ID가 .env에 필요합니다 (서버 ID)")
     _acquire_single_instance()
     bot.run(DISCORD_TOKEN)
-
-def _is_root_user(uid: int) -> bool:
-    try:
-        from utils.auth import is_root
-        return bool(is_root(int(uid)))
-    except Exception:
-        return False
-
-
-async def _handle_root_menu(interaction: discord.Interaction):
-    if not interaction.user or not _is_root_user(interaction.user.id):
-        return await _reply(interaction, embed=error_embed("권한이 없어"), ephemeral=True)
-    v = (((interaction.data or {}).get("values") or [""])[0])
-    if v == "srv_del":
-        return await _modal(interaction, RootServerIdModal("r:srv_del:go", "서버 데이터 삭제"))
-    return await _reply(interaction, embed=error_embed("잘못된 선택"), ephemeral=True)
-
-async def _handle_root_srv_del_modal(interaction: discord.Interaction, cid: str):
-    if not interaction.user or not _is_root_user(interaction.user.id):
-        return await _reply(interaction, embed=error_embed("권한이 없어"), ephemeral=True)
-    sid_raw = _get_modal_value(interaction, "server_id").strip()
-    try:
-        gid = int(sid_raw)
-    except Exception:
-        return await _reply(interaction, embed=error_embed("서버 아이디가 이상해"), ephemeral=True)
-    await _ack(interaction, thinking=True)
-    try:
-        from utils.paths import data_root
-        import shutil as _sh
-        d = data_root() / "servers" / str(gid)
-        if d.exists():
-            _sh.rmtree(d, ignore_errors=True)
-    except Exception:
-        pass
-    await interaction.followup.send(embed=ok_embed("서버 데이터 삭제 완료"), ephemeral=True)
 
 
 class ChargeConfigModal(discord.ui.Modal):

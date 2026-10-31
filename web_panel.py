@@ -18,6 +18,7 @@ from aiohttp import web
 
 from config import (
     DATA_DIR,
+    DISCORD_GUILD_ID,
     DISCORD_TOKEN,
     WEB_ADMIN_ID,
     WEB_ADMIN_PASSWORD,
@@ -356,37 +357,17 @@ async def security_middleware(request: web.Request, handler):
 
 
 def server_id_from_request(request: web.Request) -> int:
-    sid = str(request.query.get("serverId") or "").strip()
-    if not sid:
-        sid = primary_server_id()
-    if not sid or not str(sid).isdigit():
-        raise web.HTTPBadRequest(text="serverId is required")
-    return int(sid)
+    if not DISCORD_GUILD_ID:
+        raise web.HTTPBadRequest(text="DISCORD_GUILD_ID is not configured")
+    return int(DISCORD_GUILD_ID)
 
 
 def server_db_path(server_id: int) -> Path:
     return SERVER_ROOT / str(int(server_id)) / "server.db"
 
 
-def server_ids() -> list[str]:
-    if not SERVER_ROOT.exists():
-        return []
-    return [
-        item.name
-        for item in sorted(SERVER_ROOT.iterdir(), key=lambda p: p.name)
-        if item.is_dir() and item.name.isdigit() and (item / "server.db").exists()
-    ]
-
-
-def primary_server_id() -> str:
-    configured = __import__("os").getenv("WEB_PRIMARY_SERVER_ID", "").strip()
-    if configured:
-        return configured
-    ids = server_ids()
-    if not ids and DISCORD_BOT is not None:
-        guilds = getattr(DISCORD_BOT, "guilds", []) or []
-        ids = [str(getattr(g, "id", "")) for g in guilds if getattr(g, "id", None)]
-    return ids[0] if ids else ""
+def configured_guild_id_str() -> str:
+    return str(int(DISCORD_GUILD_ID)) if DISCORD_GUILD_ID else ""
 
 
 def discord_guild(server_id: int):
@@ -920,22 +901,18 @@ async def handle_me(request: web.Request) -> web.Response:
 
 async def handle_servers(request: web.Request) -> web.Response:
     require_auth(request)
-    known: dict[str, str] = {}
-    if DISCORD_BOT is not None:
-        for guild in getattr(DISCORD_BOT, "guilds", []) or []:
-            gid = str(getattr(guild, "id", "") or "")
-            if gid:
-                known[gid] = str(getattr(guild, "name", "") or f"서버 {gid}")
-    for sid in server_ids():
-        known.setdefault(str(sid), f"서버 {sid}")
-    api_name_targets = [sid for sid, name in known.items() if name == f"서버 {sid}"]
-    if api_name_targets:
-        names = await asyncio.gather(*(discord_guild_name_from_api(sid) for sid in api_name_targets))
-        for sid, name in zip(api_name_targets, names):
-            if name:
-                known[sid] = name
-    servers = [{"id": sid, "name": name} for sid, name in sorted(known.items(), key=lambda item: item[1].lower())]
-    return json_response(servers)
+    sid = configured_guild_id_str()
+    if not sid:
+        return json_response([])
+    name = f"서버 {sid}"
+    guild = discord_guild(int(sid))
+    if guild is not None and getattr(guild, "name", None):
+        name = str(guild.name)
+    else:
+        api_name = await discord_guild_name_from_api(sid)
+        if api_name:
+            name = api_name
+    return json_response([{"id": sid, "name": name}])
 
 
 async def handle_dashboard(request: web.Request) -> web.Response:

@@ -5,7 +5,14 @@ from discord import app_commands
 from discord.ext import commands
 from services import vending_service
 from ui.embeds import error_embed, ok_embed, user_stats_embed, charge_result_embed
-from ui.v2_layouts import RootPanelLayout, VendingPanelLayout
+from config import DISCORD_GUILD_ID
+from ui.v2_layouts import VendingPanelLayout
+
+
+def _wrong_guild(i: discord.Interaction) -> bool:
+    if not i.guild or not DISCORD_GUILD_ID:
+        return True
+    return int(i.guild.id) != int(DISCORD_GUILD_ID)
 
 
 def _is_admin(i: discord.Interaction) -> bool:
@@ -142,24 +149,10 @@ class CoreCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    
-    @app_commands.command(name="관리자패널", description="루트 관리자 패널을 열어")
-    async def admin_panel(self, interaction: discord.Interaction):
-        if not interaction.user:
-            return await interaction.response.send_message(embed=error_embed("권한 확인 실패"), ephemeral=True)
-        try:
-            from utils.auth import is_root
-            ok = bool(is_root(int(interaction.user.id)))
-        except Exception:
-            ok = False
-        if not ok:
-            return await interaction.response.send_message(embed=error_embed("권한이 없어"), ephemeral=True)
-        view = RootPanelLayout(interaction.user)
-        await interaction.response.send_message(view=view, ephemeral=True)
-
-    
     @app_commands.command(name="자판기", description="자판기를 채널에 띄워(다른 사람도 사용 가능)")
     async def vending_public(self, interaction: discord.Interaction):
+        if _wrong_guild(interaction):
+            return await interaction.response.send_message(embed=error_embed("이 봇은 설정된 서버에서만 사용할 수 있어"), ephemeral=True)
         if not interaction.guild or not interaction.channel:
             return await interaction.response.send_message(embed=error_embed("서버에서만 가능해"), ephemeral=True)
         if not _is_admin(interaction):
@@ -180,6 +173,8 @@ class CoreCog(commands.Cog):
 
     @app_commands.command(name="자판기패널", description="자판기 패널을 채널에 게시해")
     async def vending_panel(self, interaction: discord.Interaction):
+        if _wrong_guild(interaction):
+            return await interaction.response.send_message(embed=error_embed("이 봇은 설정된 서버에서만 사용할 수 있어"), ephemeral=True)
         if not interaction.guild:
             return await interaction.response.send_message(embed=error_embed("서버에서만 가능해"), ephemeral=True)
         if not _is_admin(interaction):
@@ -198,6 +193,8 @@ class CoreCog(commands.Cog):
 
     @app_commands.command(name="내정보", description="내 잔액/구매 정보를 확인")
     async def my_info(self, interaction: discord.Interaction):
+        if _wrong_guild(interaction):
+            return await interaction.response.send_message(embed=error_embed("이 봇은 설정된 서버에서만 사용할 수 있어"), ephemeral=True)
         if not interaction.guild:
             return await interaction.response.send_message(embed=error_embed("서버에서만 가능해"), ephemeral=True)
         await interaction.response.defer(ephemeral=True, thinking=True)
@@ -207,6 +204,8 @@ class CoreCog(commands.Cog):
     @app_commands.command(name="정보", description="유저 잔액/구매 정보를 확인(관리자)")
     @app_commands.describe(user="조회할 유저")
     async def user_info(self, interaction: discord.Interaction, user: discord.Member):
+        if _wrong_guild(interaction):
+            return await interaction.response.send_message(embed=error_embed("이 봇은 설정된 서버에서만 사용할 수 있어"), ephemeral=True)
         if not interaction.guild:
             return await interaction.response.send_message(embed=error_embed("서버에서만 가능해"), ephemeral=True)
         if not _is_admin(interaction):
@@ -231,6 +230,8 @@ class CoreCog(commands.Cog):
         amount: int,
         reason: Optional[str] = None,
     ):
+        if _wrong_guild(interaction):
+            return await interaction.response.send_message(embed=error_embed("이 봇은 설정된 서버에서만 사용할 수 있어"), ephemeral=True)
         if not interaction.guild:
             return await interaction.response.send_message(embed=error_embed("서버에서만 가능해"), ephemeral=True)
         if not await _can_manual_charge(interaction):
@@ -260,6 +261,8 @@ class CoreCog(commands.Cog):
     @app_commands.command(name="vip부여", description="유저에게 VIP 할인 티어를 부여(관리자)")
     @app_commands.describe(user="대상 유저", 티어="티어 이름. 비우면 해제")
     async def grant_vip(self, interaction: discord.Interaction, user: discord.Member, 티어: Optional[str] = None):
+        if _wrong_guild(interaction):
+            return await interaction.response.send_message(embed=error_embed("이 봇은 설정된 서버에서만 사용할 수 있어"), ephemeral=True)
         if not interaction.guild:
             return await interaction.response.send_message(embed=error_embed("서버에서만 가능해"), ephemeral=True)
         if not _is_admin(interaction):

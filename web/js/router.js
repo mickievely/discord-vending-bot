@@ -1,4 +1,3 @@
-let SERVERS = [];
 let navItems = [];
 let activeView = 'dashboard';
 const mqMobile = window.matchMedia('(max-width: 760px)');
@@ -87,30 +86,9 @@ function playViewEnter() {
   anime({ targets: items, opacity: 1, translateY: 0, delay: anime.stagger(28), duration: 280, easing: 'easeOutCubic' });
 }
 
-async function populateServers() {
-  const slot = el('server-select-slot');
-  SERVERS = await apiListServers();
-  if (!SERVERS.length) {
-    currentServer = '';
-    if (slot) slot.innerHTML = '<select id="server-select" class="select" onchange="onServerChange()"><option value="">서버 DB 없음</option></select>';
-    enhanceSelects(slot || document);
-    return;
-  }
-  if (!currentServer || !SERVERS.some((s) => s.id === currentServer)) {
-    currentServer = SERVERS[0].id;
-  }
-  if (slot) {
-    slot.innerHTML = `<select id="server-select" class="select" onchange="onServerChange()">${SERVERS.map((s) => `<option value="${s.id}">${esc(s.name)} · ${s.id}</option>`).join('')}</select>`;
-    const sel = slot.querySelector('select');
-    if (sel) sel.value = currentServer;
-  }
-  enhanceSelects(slot || document);
-}
-
-function onServerChange() {
-  currentServer = el('server-select').value;
-  toast('서버를 전환했습니다.', 'info');
-  showView(activeView);
+async function initGuild() {
+  const rows = await apiListServers();
+  currentServer = rows && rows[0] ? String(rows[0].id) : '';
 }
 
 async function showView(view, { replace = false, skipBar = false, userId = '' } = {}) {
