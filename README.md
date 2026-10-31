@@ -40,8 +40,6 @@ python bot.py
 
 ## 환경 변수 (`.env`)
 
-프로젝트 루트에 `.env` 파일을 만들고 설정합니다. **Git에 올리지 마세요.**
-
 ```env
 DISCORD_TOKEN=봇_토큰
 DATA_DIR=./data
