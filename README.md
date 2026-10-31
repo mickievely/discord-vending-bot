@@ -17,8 +17,6 @@ MIT · 자유롭게 사용·수정·배포 가능
 
 **웹 패널** — 상품·재고, 충전 승인, VIP·로그·공지 설정
 
-데이터는 `data/servers/<guild_id>/server.db` (SQLite). 서버 ID는 `.env`의 `DISCORD_GUILD_ID` 하나만 씁니다.
-
 ---
 
 ## 빠르게 쓰기
