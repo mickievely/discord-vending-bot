@@ -34,8 +34,6 @@ pip install -r requirements.txt
 python bot.py
 ```
 
-끝. 웹 패널은 `http://127.0.0.1:8765`
-
 ---
 
 ## 환경 변수 (`.env`)
@@ -54,21 +52,9 @@ WEB_PANEL_PORT=8765
 WEB_PANEL_AUTO_START=1
 ```
 
-| 변수 | 설명 |
-|------|------|
-| `DISCORD_TOKEN` | 필수 · 봇 토큰 |
-| `WEB_ADMIN_PASSWORD` | 필수 · 웹 패널 로그인 비밀번호 |
-| `ROOT_USER_IDS` | 선택 · 슈퍼관리 ID (콤마 구분, `/관리자패널`) |
-| `WEB_PANEL_HOST` | `127.0.0.1` = 본인 PC만 / `0.0.0.0` = 외부 접속 |
-| `WEB_PANEL_AUTO_START` | `1`이면 `bot.py` 실행 시 웹 패널 같이 켬 |
-
-선택: `WEB_JWT_SECRET`, `WEB_SESSION_TTL`, `PRODUCT_ADD_WEBHOOK_URL`
-
 ---
 
-## 디스코드 사용법
-
-### 슬래시 명령
+## 명령어 안내
 
 | 명령 | 설명 |
 |------|------|
@@ -94,32 +80,6 @@ WEB_PANEL_AUTO_START=1
 4. **VIP · 로그 · 공지**  
 
 여러 서버 운영 시 상단에서 **서버 선택**으로 DB 전환.
-
----
-
-## 트러블슈팅
-
-| 증상 | 체크 |
-|------|------|
-| 봇 안 켜짐 | `.env` 토큰 |
-| 버튼/슬래시 무반응 | 권한, `commands synced` 로그 |
-| 웹 패널 접속 불가 | `WEB_PANEL_AUTO_START`, 방화벽, 포트 |
-| 자동 충전 실패 | Pushbullet / iOS 설정, [`자충.txt`](./자충.txt), 입금자명 |
-
----
-
-## 폴더
-
-```
-bot.py          진입점 (봇 + 라우팅)
-web_panel.py    웹 API
-config.py       .env 로드
-cogs/           슬래시 명령
-services/       구매·충전·알림
-db/             SQLite
-ui/             Discord UI
-web/            패널 UI
-```
 
 ---
 
