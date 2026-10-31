@@ -8,13 +8,16 @@ MIT · 자유롭게 사용·수정·배포 가능
 
 ## 기능
 
-| 디스코드 | 웹 패널 | 자동 충전 |
-|----------|---------|-----------|
-| Components v2 자판기 패널 | 상품·카테고리·재고 | Android Pushbullet |
-| 구매 · 충전 · 내 정보 | 주문 · 유저 · 충전 승인 | iOS 단축어 / 웹훅 |
-| VIP 할인 · 관리자 UI | VIP · 로그 · 공지 DM | [`자충.txt`](./자충.txt) 참고 |
+- **Components v2** 자판기 패널
+- **자동 충전** — Android · iPhone ([`자충.txt`](./자충.txt))
+- **VIP** 구매·충전 할인
+- **자동 구매** — 잔액 차감 후 재고 DM 지급
+- **입고 알림** — 재고 등록 시 채널·구매자 알림
+- **구매 로그** · **구매 후기** — 채널 로그 + 구매자 후기 작성
 
-데이터는 `data/servers/<guild_id>/server.db` (SQLite)에 저장됩니다. **서버는 `.env`의 `DISCORD_GUILD_ID` 하나만** 사용합니다.
+**웹 패널** — 상품·재고, 충전 승인, VIP·로그·공지 설정
+
+데이터는 `data/servers/<guild_id>/server.db` (SQLite). 서버 ID는 `.env`의 `DISCORD_GUILD_ID` 하나만 씁니다.
 
 ---
 
