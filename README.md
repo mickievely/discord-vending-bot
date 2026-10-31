@@ -18,18 +18,23 @@ MIT · 자유롭게 사용·수정·배포 가능
 
 ---
 
-## 설치
+## 빠르게 쓰기
 
-**필요:** Python 3.11+
+Python **3.11+** 깔려 있으면 됨.
 
 ```bash
 git clone https://github.com/mickievely/discord-vending-bot.git
 cd discord-vending-bot
-
-python -m venv venv
-venv\Scripts\activate
 pip install -r requirements.txt
 ```
+
+`.env` 세팅하고 (아래 참고)
+
+```bash
+python bot.py
+```
+
+끝. 웹 패널은 `http://127.0.0.1:8765`
 
 ---
 
@@ -71,20 +76,6 @@ WEB_PANEL_AUTO_START=1
 | `WEB_PANEL_AUTO_START` | `1`이면 `bot.py` 실행 시 웹 패널 같이 켬 |
 
 선택: `WEB_JWT_SECRET`, `WEB_SESSION_TTL`, `PRODUCT_ADD_WEBHOOK_URL`
-
----
-
-## 실행
-
-```bash
-python bot.py
-```
-
-| 확인 | |
-|------|--|
-| 봇 | 콘솔 `ready: ...` |
-| 웹 패널 | `http://127.0.0.1:8765` (또는 `.env` 포트) |
-| 로그인 | `WEB_ADMIN_ID` / `WEB_ADMIN_PASSWORD` |
 
 ---
 
