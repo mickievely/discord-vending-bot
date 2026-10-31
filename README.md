@@ -28,8 +28,6 @@ cd discord-vending-bot
 pip install -r requirements.txt
 ```
 
-`.env` 세팅하고 (아래 참고)
-
 ```bash
 python bot.py
 ```
