@@ -38,17 +38,6 @@ python bot.py
 
 ---
 
-## 디스코드 봇 설정
-
-1. [Developer Portal](https://discord.com/developers/applications)에서 앱 생성  
-2. **Bot** → 토큰 발급 → 아래 `.env`의 `DISCORD_TOKEN`에만 입력  
-3. **Privileged Gateway Intents**  
-   - Message Content Intent (충전 문자 파싱)  
-   - Server Members Intent (역할·VIP, 필요 시)  
-4. **OAuth2 → URL Generator** → `bot` + `applications.commands` → 서버 초대  
-
----
-
 ## 환경 변수 (`.env`)
 
 프로젝트 루트에 `.env` 파일을 만들고 설정합니다. **Git에 올리지 마세요.**
@@ -114,7 +103,7 @@ WEB_PANEL_AUTO_START=1
 
 | 증상 | 체크 |
 |------|------|
-| 봇 안 켜짐 | `.env` 토큰, Intent, 서버 초대 |
+| 봇 안 켜짐 | `.env` 토큰 |
 | 버튼/슬래시 무반응 | 권한, `commands synced` 로그 |
 | 웹 패널 접속 불가 | `WEB_PANEL_AUTO_START`, 방화벽, 포트 |
 | 자동 충전 실패 | Pushbullet / iOS 설정, [`자충.txt`](./자충.txt), 입금자명 |
