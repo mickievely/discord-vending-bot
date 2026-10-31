@@ -339,6 +339,46 @@ async def aos_create_pending(guild_id: int, user_id: int, amount: int, depositor
     return await server_repo.aos_create_pending(dbp, user_id, amount, depositor_name)
 
 
+async def set_crypto_charge_settings(guild_id: int, enabled: bool, pay_currency: str):
+    dbp = await bootstrap_guild(guild_id)
+    await server_repo.set_crypto_charge_settings(dbp, enabled, pay_currency)
+
+
+async def crypto_create_pending(guild_id: int, user_id: int, amount: int, label: str) -> int:
+    dbp = await bootstrap_guild(guild_id)
+    return await server_repo.crypto_create_pending(dbp, user_id, amount, label)
+
+
+async def crypto_attach_invoice(
+    guild_id: int,
+    pid: int,
+    *,
+    invoice_id: str,
+    invoice_url: str,
+    order_id: str,
+    pay_currency: str,
+) -> None:
+    dbp = await bootstrap_guild(guild_id)
+    await server_repo.crypto_attach_invoice(
+        dbp,
+        pid,
+        invoice_id=invoice_id,
+        invoice_url=invoice_url,
+        order_id=order_id,
+        pay_currency=pay_currency,
+    )
+
+
+async def crypto_mark_done(guild_id: int, pid: int):
+    dbp = await bootstrap_guild(guild_id)
+    await server_repo.crypto_mark_done(dbp, pid)
+
+
+async def crypto_mark_rejected(guild_id: int, pid: int):
+    dbp = await bootstrap_guild(guild_id)
+    await server_repo.crypto_mark_rejected(dbp, pid)
+
+
 async def set_pending_request_message(guild_id: int, platform: str, pid: int, channel_id: int, message_id: int):
     dbp = await bootstrap_guild(guild_id)
     await server_repo.set_pending_request_message(dbp, platform, pid, channel_id, message_id)

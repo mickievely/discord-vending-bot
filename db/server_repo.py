@@ -86,11 +86,33 @@ async def _init_schema(db_path: Path):
         await s.execute(db_path, "ALTER TABLE charge_settings ADD COLUMN manual_charge_notice_enabled INTEGER NOT NULL DEFAULT 1")
     if "min_charge_amount" not in col_names:
         await s.execute(db_path, "ALTER TABLE charge_settings ADD COLUMN min_charge_amount INTEGER NOT NULL DEFAULT 1")
+    if "crypto_enabled" not in col_names:
+        await s.execute(db_path, "ALTER TABLE charge_settings ADD COLUMN crypto_enabled INTEGER NOT NULL DEFAULT 0")
+    if "crypto_pay_currency" not in col_names:
+        await s.execute(db_path, "ALTER TABLE charge_settings ADD COLUMN crypto_pay_currency TEXT")
 
     await s.execute(db_path, "CREATE TABLE IF NOT EXISTS ios_pending_charges (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, amount INTEGER NOT NULL, depositor_name TEXT NOT NULL, created_at INTEGER NOT NULL, status TEXT NOT NULL)")
     await s.execute(db_path, "CREATE TABLE IF NOT EXISTS ios_webhook_dedupe (message_id INTEGER PRIMARY KEY, created_at INTEGER NOT NULL)")
 
     await s.execute(db_path, "CREATE TABLE IF NOT EXISTS aos_pending_charges (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, amount INTEGER NOT NULL, depositor_name TEXT NOT NULL, created_at INTEGER NOT NULL, status TEXT NOT NULL)")
+
+    await s.execute(
+        db_path,
+        """
+        CREATE TABLE IF NOT EXISTS crypto_pending_charges (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          amount INTEGER NOT NULL,
+          depositor_name TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          status TEXT NOT NULL,
+          invoice_id TEXT,
+          invoice_url TEXT,
+          order_id TEXT,
+          pay_currency TEXT
+        )
+        """,
+    )
 
     cols = await s.fetchall(db_path, "PRAGMA table_info(ios_pending_charges)")
     col_names = {c["name"] for c in cols} if cols else set()
@@ -105,6 +127,13 @@ async def _init_schema(db_path: Path):
         await s.execute(db_path, "ALTER TABLE aos_pending_charges ADD COLUMN request_channel_id INTEGER")
     if "request_message_id" not in col_names:
         await s.execute(db_path, "ALTER TABLE aos_pending_charges ADD COLUMN request_message_id INTEGER")
+
+    cols = await s.fetchall(db_path, "PRAGMA table_info(crypto_pending_charges)")
+    col_names = {c["name"] for c in cols} if cols else set()
+    if "request_channel_id" not in col_names:
+        await s.execute(db_path, "ALTER TABLE crypto_pending_charges ADD COLUMN request_channel_id INTEGER")
+    if "request_message_id" not in col_names:
+        await s.execute(db_path, "ALTER TABLE crypto_pending_charges ADD COLUMN request_message_id INTEGER")
 
     await s.execute(db_path, "CREATE TABLE IF NOT EXISTS log_settings (id INTEGER PRIMARY KEY CHECK(id=1), buy_channel_id INTEGER, buy_desc_template TEXT, charge_channel_id INTEGER, review_channel_id INTEGER, stock_channel_id INTEGER, stock_desc_template TEXT, charge_desc_template TEXT, review_desc_template TEXT)")
     cols = await s.fetchall(db_path, "PRAGMA table_info(log_settings)")
@@ -156,7 +185,7 @@ async def _init_schema(db_path: Path):
     if not row:
         await s.execute(db_path, "INSERT INTO log_settings(id, buy_channel_id, buy_desc_template, charge_channel_id, review_channel_id, stock_channel_id, stock_desc_template, restock_dm_enabled) VALUES(1, NULL, '{유저}님 {카테고리} • {제품} 구매 감사합니다', NULL, NULL, NULL, '{제품} >> {수량}개 추가', 0)")
 
-    for table in ("ios_pending_charges", "aos_pending_charges"):
+    for table in ("ios_pending_charges", "aos_pending_charges", "crypto_pending_charges"):
         cols = await s.fetchall(db_path, f"PRAGMA table_info({table})")
         names = {c["name"] for c in cols} if cols else set()
         if "approved_by" not in names:
@@ -199,6 +228,9 @@ async def _init_schema(db_path: Path):
         "CREATE INDEX IF NOT EXISTS idx_ios_user ON ios_pending_charges(user_id)",
         "CREATE INDEX IF NOT EXISTS idx_aos_status ON aos_pending_charges(status, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_ios_status ON ios_pending_charges(status, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_crypto_user ON crypto_pending_charges(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_crypto_status ON crypto_pending_charges(status, created_at)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_crypto_order_id ON crypto_pending_charges(order_id)",
     ):
         await s.execute(db_path, sql)
     await _ensure_vip(db_path)
@@ -553,7 +585,11 @@ async def purchase(db_path: Path, user_id: int, product_id: int, qty: int):
 
 async def list_user_charges(db_path: Path, user_id: int, limit: int = 12) -> list[dict]:
     rows = []
-    for platform, table in (("AOS", "aos_pending_charges"), ("IOS", "ios_pending_charges")):
+    for platform, table in (
+        ("AOS", "aos_pending_charges"),
+        ("IOS", "ios_pending_charges"),
+        ("CRYPTO", "crypto_pending_charges"),
+    ):
         found = await s.fetchall(
             db_path,
             f"SELECT id, amount, depositor_name, created_at, status FROM {table} WHERE user_id=? ORDER BY id DESC LIMIT ?",
@@ -599,7 +635,9 @@ async def get_charge_settings(db_path: Path):
         return val
     row = await s.fetchone(
         db_path,
-        "SELECT aos_enabled, ios_enabled, pushbullet_token, ios_log_channel_id, aos_bank_name, aos_bank_account, aos_bank_owner, ios_bank_name, ios_bank_account, ios_bank_owner, charge_manager_role_id, manual_charge_notice_enabled, min_charge_amount "
+        "SELECT aos_enabled, ios_enabled, pushbullet_token, ios_log_channel_id, aos_bank_name, aos_bank_account, aos_bank_owner, "
+        "ios_bank_name, ios_bank_account, ios_bank_owner, charge_manager_role_id, manual_charge_notice_enabled, min_charge_amount, "
+        "crypto_enabled, crypto_pay_currency "
         "FROM charge_settings WHERE id=1",
     )
     SETTINGS.set(ck, row)
@@ -735,7 +773,7 @@ async def set_charge_approval(
     actor_name: Optional[str],
     approved_at: Optional[int] = None,
 ):
-    tbl = "ios_pending_charges" if str(platform).upper() == "IOS" else "aos_pending_charges"
+    tbl = _pending_table(platform)
     await s.execute(
         db_path,
         f"UPDATE {tbl} SET approved_by=?, approved_by_name=?, approved_at=? WHERE id=?",
@@ -748,11 +786,11 @@ async def set_charge_approval(
     )
 
 async def set_pending_request_message(db_path: Path, platform: str, pid: int, channel_id: int, message_id: int):
-    tbl = "ios_pending_charges" if platform.upper() == "IOS" else "aos_pending_charges"
+    tbl = _pending_table(platform)
     await s.execute(db_path, f"UPDATE {tbl} SET request_channel_id=?, request_message_id=? WHERE id=?", (int(channel_id), int(message_id), int(pid)))
 
 async def get_pending_by_id(db_path: Path, platform: str, pid: int):
-    tbl = "ios_pending_charges" if platform.upper() == "IOS" else "aos_pending_charges"
+    tbl = _pending_table(platform)
     return await s.fetchone(db_path, f"SELECT * FROM {tbl} WHERE id=?", (int(pid),))
 
 async def aos_find_match_pending(db_path: Path, amount: int, depositor_name: Optional[str]):
@@ -783,8 +821,11 @@ async def aos_mark_done(db_path: Path, pid: int):
 
 
 def _pending_table(platform: str) -> str:
-    if str(platform or "").upper() == "IOS":
+    p = str(platform or "").upper()
+    if p == "IOS":
         return "ios_pending_charges"
+    if p == "CRYPTO":
+        return "crypto_pending_charges"
     return "aos_pending_charges"
 
 
@@ -827,6 +868,19 @@ async def disable_ios_charge(db_path: Path):
     await s.execute(db_path, "UPDATE charge_settings SET ios_enabled=0 WHERE id=1")
     _bust(db_path, "charge")
 
+
+async def set_crypto_charge_settings(db_path: Path, enabled: bool, pay_currency: str):
+    row = await s.fetchone(db_path, "SELECT id FROM charge_settings WHERE id=1")
+    if not row:
+        await s.execute(db_path, "INSERT INTO charge_settings(id, aos_enabled, ios_enabled) VALUES(1, 0, 0)")
+    cur = (pay_currency or "").strip().lower() or "usdttrc20"
+    flag = 1 if enabled and cur else 0
+    await s.execute(
+        db_path,
+        "UPDATE charge_settings SET crypto_enabled=?, crypto_pay_currency=? WHERE id=1",
+        (flag, cur),
+    )
+    _bust(db_path, "charge")
 
 
 async def ios_create_pending(db_path: Path, user_id: int, amount: int, depositor_name: str) -> int:
@@ -878,6 +932,41 @@ async def aos_create_pending(db_path: Path, user_id: int, amount: int, depositor
         cur = await conn.execute("INSERT INTO aos_pending_charges(user_id, amount, depositor_name, created_at, status) VALUES(?,?,?,?,?)", (int(user_id), int(amount), str(depositor_name), now, "pending"))
         return int(cur.lastrowid or 0)
     return await s.tx(db_path, _tx)
+
+
+async def crypto_create_pending(db_path: Path, user_id: int, amount: int, label: str) -> int:
+    now = int(time.time())
+    async def _tx(conn):
+        cur = await conn.execute(
+            "INSERT INTO crypto_pending_charges(user_id, amount, depositor_name, created_at, status) VALUES(?,?,?,?,?)",
+            (int(user_id), int(amount), str(label or "코인"), now, "pending"),
+        )
+        return int(cur.lastrowid or 0)
+    return await s.tx(db_path, _tx)
+
+
+async def crypto_attach_invoice(
+    db_path: Path,
+    pid: int,
+    *,
+    invoice_id: str,
+    invoice_url: str,
+    order_id: str,
+    pay_currency: str,
+) -> None:
+    await s.execute(
+        db_path,
+        "UPDATE crypto_pending_charges SET invoice_id=?, invoice_url=?, order_id=?, pay_currency=? WHERE id=?",
+        (str(invoice_id or ""), str(invoice_url or ""), str(order_id or ""), str(pay_currency or ""), int(pid)),
+    )
+
+
+async def crypto_mark_done(db_path: Path, pid: int):
+    await s.execute(db_path, "UPDATE crypto_pending_charges SET status='done' WHERE id=?", (int(pid),))
+
+
+async def crypto_mark_rejected(db_path: Path, pid: int):
+    await s.execute(db_path, "UPDATE crypto_pending_charges SET status='rejected' WHERE id=?", (int(pid),))
 
 async def total_spent(db_path: Path, user_id: int) -> int:
     row = await s.fetchone(db_path, "SELECT COALESCE(SUM(total),0) as s FROM orders WHERE user_id=? AND status='completed'", (user_id,))

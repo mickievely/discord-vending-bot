@@ -9,7 +9,7 @@ MIT · 자유롭게 사용·수정·배포 가능
 ## 기능
 
 - **Components v2** 자판기 패널
-- **자동 충전** — Android · iPhone ([`자충.txt`](./자충.txt))
+- **자동 충전** — Android · iPhone ([`자충.txt`](./자충.txt)) · **코인 (NOWPayments)**
 - **VIP** 구매·충전 할인
 - **자동 구매** — 잔액 차감 후 재고 DM 지급
 - **입고 알림** — 재고 등록 시 채널·구매자 알림
@@ -49,6 +49,10 @@ WEB_ADMIN_PASSWORD=강한_비밀번호
 WEB_PANEL_HOST=127.0.0.1
 WEB_PANEL_PORT=8765
 WEB_PANEL_AUTO_START=1
+
+NOWPAYMENTS_API_KEY=
+NOWPAYMENTS_IPN_SECRET=
+WEB_PUBLIC_URL=https://결제콜백받을_공개주소
 ```
 
 ---

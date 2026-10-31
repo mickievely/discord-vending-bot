@@ -14,7 +14,7 @@ from discord.ext import commands
 
 from config import DISCORD_GUILD_ID, DISCORD_TOKEN, WEB_PANEL_AUTO_START
 from db import server_repo
-from services import notify, vending_service
+from services import notify, nowpayments, vending_service
 from ui.admin_modals import (
     AdminCategoryAddModal,
     AdminPanelModal,
@@ -364,7 +364,12 @@ def charge_log_view(platform: str, pid: int):
 
 
 def _charge_account_label(platform: str) -> str:
-    return "계좌 2" if str(platform).upper() == "IOS" else "계좌 1"
+    p = str(platform).upper()
+    if p == "IOS":
+        return "계좌 2"
+    if p == "CRYPTO":
+        return "코인"
+    return "계좌 1"
 
 
 def _enabled_charge_platforms(cfg: dict) -> list[str]:
@@ -382,6 +387,13 @@ def _enabled_charge_platforms(cfg: dict) -> list[str]:
         platforms.append("AOS")
     if ios_ready:
         platforms.append("IOS")
+    crypto_ready = (
+        int(cfg.get("crypto_enabled") or 0) == 1
+        and nowpayments.configured()
+        and str(cfg.get("crypto_pay_currency") or "").strip()
+    )
+    if crypto_ready:
+        platforms.append("CRYPTO")
     return platforms
 
 
@@ -389,11 +401,22 @@ def _charge_account_options(platforms=("AOS", "IOS"), cfg: dict | None = None):
     cfg = cfg or {}
     opts = []
     for platform in platforms:
-        p = str(platform).lower()
-        bank = (cfg.get(f"{p}_bank_name") or "").strip()
-        owner = (cfg.get(f"{p}_bank_owner") or "").strip()
+        p = str(platform).upper()
+        if p == "CRYPTO":
+            cur = (cfg.get("crypto_pay_currency") or "usdttrc20").strip().upper()
+            opts.append(
+                discord.SelectOption(
+                    label="코인 (NOWPayments)",
+                    value="CRYPTO",
+                    description=f"자동 충전 · {cur}"[:100],
+                )
+            )
+            continue
+        pl = str(platform).lower()
+        bank = (cfg.get(f"{pl}_bank_name") or "").strip()
+        owner = (cfg.get(f"{pl}_bank_owner") or "").strip()
         desc = " / ".join(x for x in (bank, owner) if x) or "충전 계좌"
-        opts.append(discord.SelectOption(label=_charge_account_label(platform), value=str(platform).upper(), description=desc[:100]))
+        opts.append(discord.SelectOption(label=_charge_account_label(platform), value=p, description=desc[:100]))
     return opts
 
 
@@ -408,7 +431,26 @@ def _charge_status_meta(status: str):
     return "💳 충전 요청", 0x5865F2, "아래 계좌로 입금 후 자동 확인을 기다려주세요."
 
 
-async def _build_charge_notice_embed(guild_id: int, platform: str, *, amount: int, depositor: str, status: str):
+async def _build_charge_notice_embed(
+    guild_id: int,
+    platform: str,
+    *,
+    amount: int,
+    depositor: str,
+    status: str,
+    invoice_url: str | None = None,
+):
+    if str(platform).upper() == "CRYPTO":
+        title, color, desc = _charge_status_meta(status)
+        emb = discord.Embed(title=title, description=desc, color=color)
+        emb.add_field(name="금액", value=f"`{int(amount):,}원`", inline=True)
+        emb.add_field(name="방식", value="`NOWPayments`", inline=True)
+        url = (invoice_url or "").strip()
+        if url and str(status).lower() == "pending":
+            emb.add_field(name="결제", value=f"[결제 페이지 열기]({url})", inline=False)
+            emb.set_footer(text="결제 완료 시 IPN으로 자동 충전됩니다")
+        return emb
+
     cfg = await vending_service.get_charge_settings(int(guild_id))
     cfg = dict(cfg) if cfg else {}
     p = str(platform).lower()
@@ -645,8 +687,23 @@ def _pending_key(guild_id: int, platform: str, pid: int) -> str:
     return f"{int(guild_id)}:{str(platform).upper()}:{int(pid)}"
 
 
-async def _charge_ephemeral_embed(guild_id: int, platform: str, *, amount: int, depositor: str, status: str):
-    return await _build_charge_notice_embed(guild_id, platform, amount=amount, depositor=depositor, status=status)
+async def _charge_ephemeral_embed(
+    guild_id: int,
+    platform: str,
+    *,
+    amount: int,
+    depositor: str,
+    status: str,
+    invoice_url: str | None = None,
+):
+    return await _build_charge_notice_embed(
+        guild_id,
+        platform,
+        amount=amount,
+        depositor=depositor,
+        status=status,
+        invoice_url=invoice_url,
+    )
 
 
 
@@ -2389,6 +2446,122 @@ async def _handle_admin_log_pick(interaction: discord.Interaction, cid: str):
     from ui.v2_layouts import error_toast
     return await _reply(interaction, view=error_toast("잘못된 선택"), ephemeral=True)
 
+class CryptoChargeModal(discord.ui.Modal):
+    def __init__(self):
+        super().__init__(title="코인 충전 (NOWPayments)", timeout=300)
+        self.amount = discord.ui.TextInput(label="충전 금액(원)", required=True, style=discord.TextStyle.short, max_length=20)
+        self.add_item(self.amount)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        raw_amt = str(self.amount.value).strip().replace(",", "")
+        if not raw_amt.isdigit():
+            return await _reply(interaction, embed=error_embed("금액이 올바르지 않아"), ephemeral=True)
+        amt = int(raw_amt)
+        if amt <= 0:
+            return await _reply(interaction, embed=error_embed("금액은 1원 이상"), ephemeral=True)
+        if not interaction.guild:
+            return await _reply(interaction, embed=error_embed("서버에서만 가능해"), ephemeral=True)
+
+        await _ack(interaction, thinking=True)
+        try:
+            cfg = await vending_service.get_charge_settings(interaction.guild.id)
+            cfg = dict(cfg) if cfg else {}
+            if "CRYPTO" not in _enabled_charge_platforms(cfg):
+                return await interaction.edit_original_response(embed=error_embed("코인 충전을 사용할 수 없어"))
+            min_amount = max(1, int(cfg.get("min_charge_amount") or 1))
+            if amt < min_amount:
+                return await interaction.edit_original_response(
+                    embed=error_embed(f"최소 충전 금액은 {min_amount:,}원입니다.")
+                )
+            pay_currency = str(cfg.get("crypto_pay_currency") or "usdttrc20").strip().lower()
+            label = f"NOWPayments/{pay_currency}"
+            pid = await vending_service.crypto_create_pending(interaction.guild.id, interaction.user.id, amt, label)
+            if not pid:
+                return await interaction.edit_original_response(embed=error_embed("충전요청 생성 실패"))
+
+            order_id = nowpayments.order_id_for(interaction.guild.id, int(pid))
+            inv = await nowpayments.create_invoice(
+                price_amount=amt,
+                order_id=order_id,
+                order_description=f"Discord balance {interaction.user.id}",
+                pay_currency=pay_currency,
+            )
+            if not inv.get("ok"):
+                await vending_service.crypto_mark_rejected(interaction.guild.id, int(pid))
+                err = str(inv.get("error") or "invoice failed")
+                return await interaction.edit_original_response(embed=error_embed(f"결제 생성 실패: {err[:180]}"))
+
+            invoice_url = str(inv.get("invoice_url") or "")
+            invoice_id = str(inv.get("invoice_id") or "")
+            await vending_service.crypto_attach_invoice(
+                interaction.guild.id,
+                int(pid),
+                invoice_id=invoice_id,
+                invoice_url=invoice_url,
+                order_id=order_id,
+                pay_currency=pay_currency,
+            )
+
+            platform = "CRYPTO"
+            depositor = label
+            key = _pending_key(interaction.guild.id, platform, int(pid))
+            emb = await _charge_ephemeral_embed(
+                interaction.guild.id,
+                platform,
+                amount=int(amt),
+                depositor=depositor,
+                status="pending",
+                invoice_url=invoice_url,
+            )
+            await interaction.edit_original_response(embed=emb)
+            try:
+                original_msg = await interaction.original_response()
+                EPHEMERAL_CHARGE_MSGS[key] = original_msg
+                if original_msg and getattr(original_msg, "channel", None) and getattr(original_msg, "id", None):
+                    await vending_service.set_pending_request_message(
+                        interaction.guild.id,
+                        platform,
+                        int(pid),
+                        int(original_msg.channel.id),
+                        int(original_msg.id),
+                    )
+            except Exception:
+                pass
+
+            try:
+                charge_ch = await _resolve_charge_log_channel(interaction.guild)
+                log_embed = await _build_charge_log_embed(
+                    interaction.guild.id,
+                    platform,
+                    user_id=int(interaction.user.id),
+                    amount=int(amt),
+                    depositor=depositor,
+                    pid=int(pid),
+                    status="pending",
+                )
+                sent_log = await _send_embed_channel(
+                    channel=charge_ch if isinstance(charge_ch, discord.abc.Messageable) else None,
+                    embed=log_embed,
+                    view=charge_log_view(platform, int(pid)),
+                )
+                if sent_log and getattr(sent_log, "channel", None) and getattr(sent_log, "id", None):
+                    await vending_service.set_pending_request_message(
+                        interaction.guild.id,
+                        platform,
+                        int(pid),
+                        int(sent_log.channel.id),
+                        int(sent_log.id),
+                    )
+            except Exception:
+                pass
+        except Exception as exc:
+            print(f"crypto charge failed: {type(exc).__name__}: {exc}")
+            try:
+                await interaction.edit_original_response(embed=error_embed("코인 충전 처리 중 오류가 났어. 잠시 후 다시 시도해줘"))
+            except Exception:
+                pass
+
+
 class ChargeRequestModal(discord.ui.Modal):
     def __init__(self, platform: str):
         self.platform = platform.upper()
@@ -2506,6 +2679,7 @@ async def _edit_request_message(guild_id: int, platform: str, pending: dict, sta
                     amount=int(pending.get("amount") or 0),
                     depositor=str(pending.get("depositor_name") or ""),
                     status=str(status),
+                    invoice_url=str(pending.get("invoice_url") or "") or None,
                 )
                 await msg.edit(embed=emb)
             except Exception:
@@ -2563,6 +2737,8 @@ async def _auto_approve_charge(guild_id: int, platform: str, pid: int, processed
         return False
     if platform.upper() == "AOS":
         await vending_service.aos_mark_done(guild_id, pid)
+    elif platform.upper() == "CRYPTO":
+        await vending_service.crypto_mark_done(guild_id, pid)
     else:
         await vending_service.ios_mark_done(guild_id, pid, 0)
     await _edit_request_message(guild_id, platform, pending, "done")
@@ -2578,9 +2754,10 @@ async def _handle_charge_approve(interaction: discord.Interaction, platform: str
     if not pending or str(pending.get("status")) != "pending":
         return await interaction.followup.send(embed=error_embed("이미 처리된 요청이야"), ephemeral=True)
     now = int(time.time())
-    if now - int(pending.get("created_at") or 0) > 300:
+    ttl = 86400 if str(platform).upper() == "CRYPTO" else 300
+    if now - int(pending.get("created_at") or 0) > ttl:
         await _edit_request_message(interaction.guild.id, platform, pending, "expired")
-        return await interaction.followup.send(embed=error_embed("5분이 지나서 처리할 수 없어"), ephemeral=True)
+        return await interaction.followup.send(embed=error_embed("요청 유효시간이 지났어"), ephemeral=True)
 
     if not await vending_service.claim_pending_charge(interaction.guild.id, platform, pid):
         return await interaction.followup.send(embed=error_embed("이미 처리된 요청이야"), ephemeral=True)
@@ -2606,6 +2783,8 @@ async def _handle_charge_approve(interaction: discord.Interaction, platform: str
     pending["approved_at"] = now
     if platform.upper() == "AOS":
         await vending_service.aos_mark_done(interaction.guild.id, pid)
+    elif platform.upper() == "CRYPTO":
+        await vending_service.crypto_mark_done(interaction.guild.id, pid)
     else:
         await vending_service.ios_mark_done(interaction.guild.id, pid, 0)
     await _edit_request_message(interaction.guild.id, platform, pending, "done")
@@ -2621,11 +2800,14 @@ async def _handle_charge_reject(interaction: discord.Interaction, platform: str,
     if not pending or str(pending.get("status")) != "pending":
         return await interaction.followup.send(embed=error_embed("이미 처리된 요청이야"), ephemeral=True)
     now = int(time.time())
-    if now - int(pending.get("created_at") or 0) > 300:
+    ttl = 86400 if str(platform).upper() == "CRYPTO" else 300
+    if now - int(pending.get("created_at") or 0) > ttl:
         await _edit_request_message(interaction.guild.id, platform, pending, "expired")
-        return await interaction.followup.send(embed=error_embed("5분이 지나서 처리할 수 없어"), ephemeral=True)
+        return await interaction.followup.send(embed=error_embed("요청 유효시간이 지났어"), ephemeral=True)
     if platform.upper() == "AOS":
         await vending_service.aos_mark_rejected(interaction.guild.id, pid)
+    elif platform.upper() == "CRYPTO":
+        await vending_service.crypto_mark_rejected(interaction.guild.id, pid)
     else:
         await vending_service.ios_mark_rejected(interaction.guild.id, pid)
     await _edit_request_message(interaction.guild.id, platform, pending, "rejected")
@@ -2649,6 +2831,8 @@ async def _handle_k_charge(interaction: discord.Interaction):
         )
 
     platform = platforms[0]
+    if platform == "CRYPTO":
+        return await _modal(interaction, CryptoChargeModal())
     if platform == "IOS":
         return await _modal(interaction, ChargeRequestModal("IOS"))
 
@@ -2659,11 +2843,15 @@ async def _handle_k_charge_pick(interaction: discord.Interaction):
     if not interaction.guild:
         return await _reply(interaction, embed=error_embed("서버에서만 가능해"), ephemeral=True)
     picked = str(((interaction.data or {}).get("values") or [""])[0]).upper()
-    if picked not in ("AOS", "IOS"):
+    if picked not in ("AOS", "IOS", "CRYPTO"):
         return await _reply(interaction, embed=error_embed("선택이 이상해"), ephemeral=True)
     cfg = await vending_service.get_charge_settings(interaction.guild.id)
     cfg = dict(cfg) if cfg else {}
     ready = _enabled_charge_platforms(cfg)
+    if picked == "CRYPTO":
+        if "CRYPTO" not in ready:
+            return await _reply(interaction, embed=error_embed("코인 충전 설정이 비어있거나 NOWPayments 연동이 안 됐어"), ephemeral=True)
+        return await _modal(interaction, CryptoChargeModal())
     if picked == "IOS":
         if "IOS" not in ready:
             return await _reply(interaction, embed=error_embed("계좌 2 충전 설정이 비어있거나 완성되지 않았어"), ephemeral=True)

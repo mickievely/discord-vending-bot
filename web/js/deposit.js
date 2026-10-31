@@ -44,6 +44,12 @@ async function renderCharges() {
               <div class="field"><label>수동충전 역할</label><select class="select" id="cs-approveRole">${roleOpts(roles, settings.approveRole || settings.manualChargeRole)}</select></div>
             </div>
             ${switchRow('cs-manualNotice', '수동충전 메시지 전송', settings.manualChargeNotice !== false)}
+            <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
+              <div style="font-size:12px;font-weight:600;color:var(--accent);margin-bottom:12px">코인 (NOWPayments)</div>
+              <div class="hint" style="margin-bottom:10px">API 키·IPN Secret·공개 URL은 서버 <code>.env</code> (NOWPAYMENTS_*, WEB_PUBLIC_URL)</div>
+              ${switchRow('cs-cryptoEnabled', '코인 자동충전 사용', !!settings.cryptoEnabled)}
+              <div class="field"><label>결제 코인 (pay_currency)</label><input class="input" id="cs-cryptoCurrency" placeholder="usdttrc20" value="${esc(settings.cryptoPayCurrency || 'usdttrc20')}"/></div>
+            </div>
             <div class="form-actions"><button type="submit" class="btn btn-primary">설정 저장</button></div>
           </form>
         </div>
@@ -69,7 +75,7 @@ function renderChargeTable() {
     <thead><tr><th>요청 ID</th><th>계좌</th><th>유저 ID</th><th>입금자명</th><th>금액</th><th>요청 시간</th><th>상태</th><th>처리 스태프</th><th>승인/거절</th></tr></thead>
     <tbody>${pageRows.map((c) => `<tr>
       <td data-label="요청 ID" class="mono" style="font-size:12px">${esc(c.id)}</td>
-      <td data-label="계좌"><span class="badge ${c.platform === 'AOS' ? 'badge-info' : 'badge-muted'}">${chargeAccountLabel(c.platform)}</span></td>
+      <td data-label="계좌"><span class="badge ${c.platform === 'AOS' ? 'badge-info' : (c.platform === 'CRYPTO' ? 'badge-success' : 'badge-muted')}">${chargeAccountLabel(c.platform)}</span></td>
       <td data-label="유저 ID" class="mono" style="font-size:12px">${esc(c.userId)}</td>
       <td data-label="입금자명">${esc(c.depositor)}</td>
       <td data-label="금액" class="amount text-success">+${won(c.amount)}</td>
@@ -92,7 +98,10 @@ function renderChargeTable() {
 }
 
 function chargeAccountLabel(platform) {
-  return String(platform || '').toUpperCase() === 'IOS' ? '계좌 2' : '계좌 1';
+  const p = String(platform || '').toUpperCase();
+  if (p === 'IOS') return '계좌 2';
+  if (p === 'CRYPTO') return '코인';
+  return '계좌 1';
 }
 
 function onChargeSearch(v) {
@@ -130,7 +139,9 @@ async function saveChargeSettings(e) {
     iosBank: el('cs-iosBank').value, iosAccount: el('cs-iosAccount').value, iosHolder: el('cs-iosHolder').value, iosLogChannel: el('cs-iosLogChannel').value,
     approveRole: el('cs-approveRole').value,
     minChargeAmount: parseInt(el('cs-minChargeAmount').value, 10) || 1,
-    manualChargeNotice: el('cs-manualNotice').checked
+    manualChargeNotice: el('cs-manualNotice').checked,
+    cryptoEnabled: el('cs-cryptoEnabled').checked,
+    cryptoPayCurrency: el('cs-cryptoCurrency').value
   };
   await apiSaveChargeSettings(data);
   btn.disabled = false; btn.textContent = '설정 저장';

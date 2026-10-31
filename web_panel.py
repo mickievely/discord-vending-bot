@@ -601,7 +601,7 @@ def charge_id(platform: str, pid: Any) -> str:
 def split_charge_id(value: str) -> tuple[str, int]:
     platform, pid = unquote(str(value)).split(":", 1)
     platform = platform.upper()
-    if platform not in ("AOS", "IOS"):
+    if platform not in ("AOS", "IOS", "CRYPTO"):
         raise ValueError("invalid platform")
     return platform, int(pid)
 
@@ -614,7 +614,11 @@ def ui_charge_status(status: str) -> str:
 
 async def list_charges_payload(path: Path) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
-    for platform, table in (("AOS", "aos_pending_charges"), ("IOS", "ios_pending_charges")):
+    for platform, table in (
+        ("AOS", "aos_pending_charges"),
+        ("IOS", "ios_pending_charges"),
+        ("CRYPTO", "crypto_pending_charges"),
+    ):
         rows = await db.fetchall(
             path,
             f"SELECT * FROM {table} ORDER BY id DESC LIMIT 300",
@@ -756,7 +760,11 @@ async def get_user_payload(path: Path, uid: int) -> dict[str, Any]:
         (uid,),
     )
     charge_rows = []
-    for platform, table in (("AOS", "aos_pending_charges"), ("IOS", "ios_pending_charges")):
+    for platform, table in (
+        ("AOS", "aos_pending_charges"),
+        ("IOS", "ios_pending_charges"),
+        ("CRYPTO", "crypto_pending_charges"),
+    ):
         rows = await db.fetchall(
             path,
             f"SELECT id, amount, depositor_name, created_at, status FROM {table} WHERE user_id=? ORDER BY id DESC LIMIT 10",
@@ -1277,6 +1285,8 @@ async def handle_charge_action(request: web.Request) -> web.Response:
             pending["approved_at"] = now
             if platform == "AOS":
                 await server_repo.aos_mark_done(path, pid)
+            elif platform == "CRYPTO":
+                await server_repo.crypto_mark_done(path, pid)
             else:
                 await db.execute(path, "UPDATE ios_pending_charges SET status='done' WHERE id=?", (pid,))
             try:
@@ -1287,6 +1297,8 @@ async def handle_charge_action(request: web.Request) -> web.Response:
     elif action == "reject":
         if platform == "AOS":
             await server_repo.aos_mark_rejected(path, pid)
+        elif platform == "CRYPTO":
+            await server_repo.crypto_mark_rejected(path, pid)
         else:
             await server_repo.ios_mark_rejected(path, pid)
     else:
@@ -1315,6 +1327,8 @@ async def handle_charge_settings(request: web.Request) -> web.Response:
                 "manualChargeRole": str(row.get("charge_manager_role_id") or ""),
                 "manualChargeNotice": int(row.get("manual_charge_notice_enabled") if row.get("manual_charge_notice_enabled") is not None else 1) == 1,
                 "minChargeAmount": int(row.get("min_charge_amount") or 1),
+                "cryptoEnabled": int(row.get("crypto_enabled") or 0) == 1,
+                "cryptoPayCurrency": str(row.get("crypto_pay_currency") or "usdttrc20"),
             }
         )
     body = await request.json()
@@ -1336,6 +1350,11 @@ async def handle_charge_settings(request: web.Request) -> web.Response:
     await server_repo.set_charge_manager_role(path, clean_int(body.get("approveRole")))
     await server_repo.set_manual_charge_notice_enabled(path, bool(body.get("manualChargeNotice")))
     await server_repo.set_min_charge_amount(path, clean_int(body.get("minChargeAmount")) or 1)
+    await server_repo.set_crypto_charge_settings(
+        path,
+        bool(body.get("cryptoEnabled")),
+        str(body.get("cryptoPayCurrency") or "usdttrc20").strip(),
+    )
     return json_response({"ok": True})
 
 
@@ -1633,10 +1652,35 @@ async def handle_vip_reorder(request: web.Request) -> web.Response:
     return json_response({"ok": True})
 
 
+async def handle_nowpayments_webhook(request: web.Request) -> web.Response:
+    if request.method != "POST":
+        return web.Response(status=405, text="method not allowed")
+    try:
+        raw = await request.read()
+        payload = json.loads(raw.decode("utf-8") if raw else "{}")
+    except Exception:
+        return web.Response(status=400, text="bad json")
+    if not isinstance(payload, dict):
+        return web.Response(status=400, text="bad payload")
+    sig = str(request.headers.get("x-nowpayments-sig") or request.headers.get("X-NOWPayments-Sig") or "")
+    from services import nowpayments
+
+    if not nowpayments.verify_ipn_signature(payload, sig):
+        return web.Response(status=403, text="invalid signature")
+    try:
+        from services import crypto_charge
+
+        await crypto_charge.handle_ipn_payload(payload)
+    except Exception as exc:
+        print(f"nowpayments ipn: {type(exc).__name__}: {exc}")
+    return web.Response(text="ok")
+
+
 def app() -> web.Application:
     application = web.Application(client_max_size=CLIENT_MAX_SIZE, middlewares=[security_middleware])
     application.router.add_get("/", handle_index)
     application.router.add_get("/assets/{path:.*}", handle_static)
+    application.router.add_post("/api/webhooks/nowpayments", handle_nowpayments_webhook)
     application.router.add_post("/api/auth/login", handle_login)
     application.router.add_post("/api/auth/logout", handle_logout)
     application.router.add_get("/api/auth/me", handle_me)
