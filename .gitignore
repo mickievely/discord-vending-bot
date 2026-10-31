@@ -2,7 +2,6 @@
 .env
 .env.local
 .env.*.local
-README.md
 .env.example
 data/
 *.db
